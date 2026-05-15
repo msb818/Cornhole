@@ -246,6 +246,48 @@
       <div class="toggle-row">
         <label class="checkbox-label"><input type="checkbox" id="set-tts-enabled" checked /> Enable speaker announcements (text-to-speech)</label>
       </div>
+      <div class="form-row">
+        <div class="full">
+          <label>Voice Provider</label>
+          <select id="set-tts-provider" style="max-width: 360px;">
+            <option value="browser">Browser / OS voices (offline, free)</option>
+            <option value="google">Google Cloud TTS (online, near-human quality)</option>
+          </select>
+        </div>
+      </div>
+      <div id="google-settings" style="display: none; background: var(--panel2); border: 1px solid var(--accent); border-radius: 6px; padding: 12px; margin: 8px 0;">
+        <h3 style="margin-top: 0;">Google Cloud TTS</h3>
+        <div class="form-row">
+          <div class="full">
+            <label>Google Cloud API Key</label>
+            <input type="password" id="set-google-key" placeholder="AIzaSy..." autocomplete="off" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Google Voice</label>
+            <select id="set-google-voice"></select>
+          </div>
+          <div>
+            <button class="btn" id="btn-test-google">🔊 Test Google Voice</button>
+          </div>
+        </div>
+        <p class="muted" style="font-size: 12px; margin: 4px 0;">⚠️ Restrict the API key in the Google Cloud Console to <em>Cloud Text-to-Speech API only</em>. The key is stored only in this browser. If automation/network fails, announcements fall back to the OS voice automatically.</p>
+        <details>
+          <summary style="cursor: pointer; color: var(--accent2); font-size: 13px;">📋 How to get a Google Cloud API key →</summary>
+          <div class="muted" style="font-size: 12px; line-height: 1.6; margin-top: 8px;">
+            <ol style="margin: 4px 0 4px 18px; padding: 0;">
+              <li>Go to <strong>console.cloud.google.com</strong> and sign in.</li>
+              <li>Create a new project ("Cornhole TTS").</li>
+              <li>Enable billing on the project (credit card required; you stay in the 1M-char/month free tier).</li>
+              <li>Search "Text-to-Speech API" → click the result → click <strong>Enable</strong>.</li>
+              <li>APIs &amp; Services → <strong>Credentials</strong> → Create Credentials → <strong>API key</strong>.</li>
+              <li>Click the key to edit it → <strong>Restrict key</strong> → API restrictions = Cloud Text-to-Speech API only → Save.</li>
+              <li>Paste the key above and click "Test Google Voice".</li>
+            </ol>
+          </div>
+        </details>
+      </div>
       <div class="toggle-row">
         <label class="checkbox-label"><input type="checkbox" id="set-auto-assign" checked /> Auto-assign next ready match when a board frees up</label>
       </div>
@@ -340,9 +382,29 @@ function freshState() {
       template: '{team1} to {board} board. {team2} to {board} board.',
       announceRepeats: 3,
       announceIntervalSec: 60,
+      ttsProvider: 'browser', // 'browser' or 'google'
+      googleApiKey: '',
+      googleVoice: 'en-US-Neural2-F',
     },
   };
 }
+
+const GOOGLE_VOICES = [
+  { name: 'en-US-Studio-O', label: 'Studio O — Male, US (highest quality)' },
+  { name: 'en-US-Studio-Q', label: 'Studio Q — Male, US, conversational' },
+  { name: 'en-US-Neural2-A', label: 'Neural2 A — Male, US' },
+  { name: 'en-US-Neural2-C', label: 'Neural2 C — Female, US' },
+  { name: 'en-US-Neural2-D', label: 'Neural2 D — Male, US, deep' },
+  { name: 'en-US-Neural2-F', label: 'Neural2 F — Female, US ⭐' },
+  { name: 'en-US-Neural2-G', label: 'Neural2 G — Female, US' },
+  { name: 'en-US-Neural2-H', label: 'Neural2 H — Female, US' },
+  { name: 'en-US-Neural2-I', label: 'Neural2 I — Male, US' },
+  { name: 'en-US-Neural2-J', label: 'Neural2 J — Male, US' },
+  { name: 'en-GB-Neural2-B', label: 'Neural2 B — Male, UK' },
+  { name: 'en-GB-Neural2-F', label: 'Neural2 F — Female, UK' },
+  { name: 'en-AU-Neural2-B', label: 'Neural2 B — Male, Australian' },
+  { name: 'en-AU-Neural2-C', label: 'Neural2 C — Female, Australian' },
+];
 
 function loadState() {
   try {
@@ -362,6 +424,9 @@ function loadState() {
     if (s.settings) {
       if (s.settings.announceRepeats === undefined) s.settings.announceRepeats = 3;
       if (s.settings.announceIntervalSec === undefined) s.settings.announceIntervalSec = 60;
+      if (s.settings.ttsProvider === undefined) s.settings.ttsProvider = 'browser';
+      if (s.settings.googleApiKey === undefined) s.settings.googleApiKey = '';
+      if (s.settings.googleVoice === undefined) s.settings.googleVoice = 'en-US-Neural2-F';
     }
     return s;
   } catch (e) { return null; }
@@ -1026,8 +1091,70 @@ function cancelPendingAnnouncements(matchId) {
   pendingAnnouncements.delete(matchId);
 }
 
-function speak(text, opts) {
-  if (!state.settings.ttsEnabled) return;
+// Audio queue for Google TTS (so multiple announcements don't overlap)
+const googleAudioQueue = [];
+let googleAudioPlaying = false;
+let googleAudioCurrent = null;
+
+async function drainGoogleQueue() {
+  if (googleAudioPlaying) return;
+  googleAudioPlaying = true;
+  while (googleAudioQueue.length) {
+    const src = googleAudioQueue.shift();
+    const audio = new Audio(src);
+    audio.volume = parseFloat(state.settings.ttsVolume);
+    if (isNaN(audio.volume)) audio.volume = 1;
+    googleAudioCurrent = audio;
+    await new Promise(resolve => {
+      audio.onended = resolve;
+      audio.onerror = resolve;
+      audio.play().catch(resolve);
+    });
+    googleAudioCurrent = null;
+  }
+  googleAudioPlaying = false;
+}
+
+function stopGoogleAudio() {
+  googleAudioQueue.length = 0;
+  if (googleAudioCurrent) {
+    try { googleAudioCurrent.pause(); googleAudioCurrent.currentTime = 0; } catch (e) {}
+    googleAudioCurrent = null;
+  }
+}
+
+async function speakGoogle(text, opts) {
+  const key = (state.settings.googleApiKey || '').trim();
+  if (!key) throw new Error('No API key configured');
+  const voiceName = state.settings.googleVoice || 'en-US-Neural2-F';
+  const langCode = voiceName.split('-').slice(0, 2).join('-');
+  const rate = parseFloat(state.settings.ttsRate);
+  const resp = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${encodeURIComponent(key)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      input: { text },
+      voice: { languageCode: langCode, name: voiceName },
+      audioConfig: {
+        audioEncoding: 'MP3',
+        speakingRate: isNaN(rate) ? 1.0 : rate,
+        volumeGainDb: 0,
+      },
+    }),
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error(`Google TTS HTTP ${resp.status}: ${errText.slice(0, 200)}`);
+  }
+  const data = await resp.json();
+  if (!data.audioContent) throw new Error('Google TTS returned no audio');
+  const src = 'data:audio/mp3;base64,' + data.audioContent;
+  if (opts && opts.interrupt) stopGoogleAudio();
+  googleAudioQueue.push(src);
+  drainGoogleQueue();
+}
+
+function speakBrowser(text, opts) {
   if (typeof speechSynthesis === 'undefined') return;
   const interrupt = opts && opts.interrupt;
   if (interrupt) { try { speechSynthesis.cancel(); } catch (e) {} }
@@ -1041,6 +1168,19 @@ function speak(text, opts) {
     if (v) u.voice = v;
   }
   speechSynthesis.speak(u);
+}
+
+function speak(text, opts) {
+  if (!state.settings.ttsEnabled) return;
+  if (state.settings.ttsProvider === 'google' && (state.settings.googleApiKey || '').trim()) {
+    speakGoogle(text, opts).catch(err => {
+      console.warn('Google TTS failed; falling back to browser TTS:', err);
+      logAnnounce(`⚠️ Google TTS error (${err.message}) — falling back to browser voice`);
+      speakBrowser(text, opts);
+    });
+    return;
+  }
+  speakBrowser(text, opts);
 }
 
 function announceMatch(matchId, opts) {
@@ -1519,7 +1659,18 @@ function renderSettings() {
   document.getElementById('set-tts-template').value = state.settings.template;
   document.getElementById('set-announce-repeats').value = state.settings.announceRepeats;
   document.getElementById('set-announce-interval').value = state.settings.announceIntervalSec;
+  document.getElementById('set-tts-provider').value = state.settings.ttsProvider || 'browser';
+  document.getElementById('set-google-key').value = state.settings.googleApiKey || '';
+  populateGoogleVoices();
+  document.getElementById('google-settings').style.display = (state.settings.ttsProvider === 'google') ? 'block' : 'none';
   populateVoices();
+}
+
+function populateGoogleVoices() {
+  const sel = document.getElementById('set-google-voice');
+  sel.innerHTML = GOOGLE_VOICES.map(v =>
+    `<option value="${v.name}" ${v.name === state.settings.googleVoice ? 'selected' : ''}>${escapeHtml(v.label)}</option>`
+  ).join('');
 }
 
 function populateVoices() {
@@ -1555,7 +1706,7 @@ function populateVoices() {
     saveState();
   });
 });
-['set-tts-rate','set-tts-volume','set-tts-template','set-tts-voice','set-announce-repeats','set-announce-interval'].forEach(id => {
+['set-tts-rate','set-tts-volume','set-tts-template','set-tts-voice','set-announce-repeats','set-announce-interval','set-tts-provider','set-google-key','set-google-voice'].forEach(id => {
   document.getElementById(id).addEventListener('change', e => {
     const keyMap = {
       'set-tts-rate': 'ttsRate',
@@ -1564,13 +1715,35 @@ function populateVoices() {
       'set-tts-voice': 'ttsVoice',
       'set-announce-repeats': 'announceRepeats',
       'set-announce-interval': 'announceIntervalSec',
+      'set-tts-provider': 'ttsProvider',
+      'set-google-key': 'googleApiKey',
+      'set-google-voice': 'googleVoice',
     };
     state.settings[keyMap[id]] = e.target.value;
     saveState();
+    if (id === 'set-tts-provider') {
+      document.getElementById('google-settings').style.display = (e.target.value === 'google') ? 'block' : 'none';
+    }
   });
 });
 document.getElementById('btn-test-tts').addEventListener('click', () => {
-  speak('Sam Jones and Jordan Lee to Texas board. Casey Smith and Riley Brown to Texas board.');
+  speak('Sam Jones and Jordan Lee to Texas board. Casey Smith and Riley Brown to Texas board.', { interrupt: true });
+});
+document.getElementById('btn-test-google').addEventListener('click', async () => {
+  const key = (document.getElementById('set-google-key').value || '').trim();
+  if (!key) { alert('Enter a Google Cloud API key first.'); return; }
+  // Persist the key first so speakGoogle uses it
+  state.settings.googleApiKey = key;
+  state.settings.googleVoice = document.getElementById('set-google-voice').value;
+  saveState();
+  try {
+    stopGoogleAudio();
+    await speakGoogle('Sam Jones and Jordan Lee to Texas board. Casey Smith and Riley Brown to Texas board.', { interrupt: true });
+    logAnnounce('✅ Google TTS test succeeded.');
+  } catch (err) {
+    alert('Google TTS test failed:\n\n' + err.message + '\n\nCheck that:\n• The API key is correct\n• Billing is enabled on the project\n• The Text-to-Speech API is enabled\n• The key isn\'t restricted to a different API');
+    logAnnounce(`❌ Google TTS test failed: ${err.message}`);
+  }
 });
 
 if (typeof speechSynthesis !== 'undefined') {
@@ -1581,7 +1754,9 @@ if (typeof speechSynthesis !== 'undefined') {
    DATA EXPORT/IMPORT/RESET
 ============================================================ */
 document.getElementById('btn-export').addEventListener('click', () => {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const safe = JSON.parse(JSON.stringify(state));
+  if (safe.settings) safe.settings.googleApiKey = '';
+  const blob = new Blob([JSON.stringify(safe, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
