@@ -312,7 +312,7 @@ function freshState() {
       ttsVolume: 1,
       autoAssign: true,
       autoAnnounce: true,
-      template: 'Next up on {board} board: {team1}, versus {team2}. Please report to the {board} board.',
+      template: '{team1} to {board} board. {team2} to {board} board.',
     },
   };
 }
@@ -322,8 +322,16 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw);
-    // basic sanity
     if (!s.teams || !s.boards) return null;
+    // Migrate old announcement template if user hadn't customized it
+    const OLD_TEMPLATES = [
+      'Next up on {board} board: {team1}, versus {team2}. Please report to the {board} board.',
+      'Next up on {board}: {team1} versus {team2}. Please report to {board} board.',
+      'Next up on {board}: {team1} versus {team2}.',
+    ];
+    if (s.settings && OLD_TEMPLATES.includes(s.settings.template)) {
+      s.settings.template = '{team1} to {board} board. {team2} to {board} board.';
+    }
     return s;
   } catch (e) { return null; }
 }
@@ -356,11 +364,10 @@ function teamFullLabel(teamId) {
 }
 
 function teamAnnounceLabel(teamId) {
-  // For TTS - use first names so it's clear who's being called
+  // For TTS - always use full first + last names so people know who's being called
   if (!teamId || teamId === 'BYE') return '';
   const t = state.teams.find(x => x.id === teamId);
   if (!t) return '';
-  if (t.name && t.name.trim()) return `${t.name.trim()}: ${t.p1f} and ${t.p2f}`;
   return `${t.p1f} ${t.p1l} and ${t.p2f} ${t.p2l}`;
 }
 
@@ -1449,7 +1456,7 @@ function populateVoices() {
   });
 });
 document.getElementById('btn-test-tts').addEventListener('click', () => {
-  speak('Test announcement. Next up on Texas board: Sam and Jordan, versus Casey and Riley. Please report to the Texas board.');
+  speak('Sam Jones and Jordan Lee to Texas board. Casey Smith and Riley Brown to Texas board.');
 });
 
 if (typeof speechSynthesis !== 'undefined') {
