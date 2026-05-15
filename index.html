@@ -147,6 +147,10 @@
           <label>Player 1 Last</label>
           <input id="in-p1l" />
         </div>
+        <div class="full">
+          <label>Player 1 Description <span class="muted">(e.g. "red shirt, baseball cap" — not announced, used to find people)</span></label>
+          <input id="in-p1desc" placeholder="What are they wearing? Any other identifiers?" />
+        </div>
         <div>
           <label>Player 2 First</label>
           <input id="in-p2f" />
@@ -155,7 +159,11 @@
           <label>Player 2 Last</label>
           <input id="in-p2l" />
         </div>
-        <div>
+        <div class="full">
+          <label>Player 2 Description <span class="muted">(optional)</span></label>
+          <input id="in-p2desc" placeholder="What are they wearing? Any other identifiers?" />
+        </div>
+        <div class="full">
           <button class="btn" id="btn-add-team">Add Team</button>
         </div>
       </div>
@@ -374,8 +382,10 @@ function teamFullLabel(teamId) {
   if (teamId === 'BYE') return 'BYE';
   const t = state.teams.find(x => x.id === teamId);
   if (!t) return '???';
-  const players = `${t.p1f} ${t.p1l} and ${t.p2f} ${t.p2l}`;
-  return t.name && t.name.trim() ? `${t.name.trim()} (${players})` : players;
+  const p1 = `${t.p1f} ${t.p1l}` + (t.p1desc ? ` (${t.p1desc})` : '');
+  const p2 = `${t.p2f} ${t.p2l}` + (t.p2desc ? ` (${t.p2desc})` : '');
+  const players = `${p1} and ${p2}`;
+  return t.name && t.name.trim() ? `${t.name.trim()} — ${players}` : players;
 }
 
 function teamAnnounceLabel(teamId) {
@@ -434,11 +444,13 @@ function renderSignup() {
   tbody.innerHTML = '';
   state.teams.forEach((t, idx) => {
     const tr = document.createElement('tr');
+    const p1Desc = t.p1desc ? `<div class="muted" style="font-size: 11px;">${escapeHtml(t.p1desc)}</div>` : '';
+    const p2Desc = t.p2desc ? `<div class="muted" style="font-size: 11px;">${escapeHtml(t.p2desc)}</div>` : '';
     tr.innerHTML = `
       <td>${idx + 1}</td>
       <td>${escapeHtml(t.name || '')}</td>
-      <td>${escapeHtml(t.p1f)} ${escapeHtml(t.p1l)}</td>
-      <td>${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}</td>
+      <td>${escapeHtml(t.p1f)} ${escapeHtml(t.p1l)}${p1Desc}</td>
+      <td>${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}${p2Desc}</td>
       <td>
         <button class="btn-secondary btn btn-small" data-edit="${t.id}">Edit</button>
         <button class="btn-danger btn btn-small" data-del="${t.id}">×</button>
@@ -471,19 +483,19 @@ document.getElementById('btn-add-team').addEventListener('click', () => {
   const name = document.getElementById('in-team-name').value.trim();
   const p1f = document.getElementById('in-p1f').value.trim();
   const p1l = document.getElementById('in-p1l').value.trim();
+  const p1desc = document.getElementById('in-p1desc').value.trim();
   const p2f = document.getElementById('in-p2f').value.trim();
   const p2l = document.getElementById('in-p2l').value.trim();
+  const p2desc = document.getElementById('in-p2desc').value.trim();
   if (!p1f || !p1l || !p2f || !p2l) {
     alert('Please fill in both players\' first and last names.');
     return;
   }
-  state.teams.push({ id: uid(), name, p1f, p1l, p2f, p2l });
+  state.teams.push({ id: uid(), name, p1f, p1l, p1desc, p2f, p2l, p2desc });
   saveState();
-  document.getElementById('in-team-name').value = '';
-  document.getElementById('in-p1f').value = '';
-  document.getElementById('in-p1l').value = '';
-  document.getElementById('in-p2f').value = '';
-  document.getElementById('in-p2l').value = '';
+  ['in-team-name','in-p1f','in-p1l','in-p1desc','in-p2f','in-p2l','in-p2desc'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
   document.getElementById('in-team-name').focus();
   renderSignup();
 });
@@ -497,8 +509,10 @@ function openEditTeam(id) {
       <div class="full"><label>Team Name</label><input id="ed-name" value="${escapeHtml(t.name || '')}" /></div>
       <div><label>P1 First</label><input id="ed-p1f" value="${escapeHtml(t.p1f)}" /></div>
       <div><label>P1 Last</label><input id="ed-p1l" value="${escapeHtml(t.p1l)}" /></div>
+      <div class="full"><label>P1 Description</label><input id="ed-p1desc" value="${escapeHtml(t.p1desc || '')}" /></div>
       <div><label>P2 First</label><input id="ed-p2f" value="${escapeHtml(t.p2f)}" /></div>
       <div><label>P2 Last</label><input id="ed-p2l" value="${escapeHtml(t.p2l)}" /></div>
+      <div class="full"><label>P2 Description</label><input id="ed-p2desc" value="${escapeHtml(t.p2desc || '')}" /></div>
     </div>
     <div class="modal-actions">
       <button class="btn-secondary btn" onclick="closeModal()">Cancel</button>
@@ -509,8 +523,10 @@ function openEditTeam(id) {
     t.name = document.getElementById('ed-name').value.trim();
     t.p1f = document.getElementById('ed-p1f').value.trim();
     t.p1l = document.getElementById('ed-p1l').value.trim();
+    t.p1desc = document.getElementById('ed-p1desc').value.trim();
     t.p2f = document.getElementById('ed-p2f').value.trim();
     t.p2l = document.getElementById('ed-p2l').value.trim();
+    t.p2desc = document.getElementById('ed-p2desc').value.trim();
     saveState();
     closeModal();
     renderSignup();
@@ -550,9 +566,11 @@ function renderSeeding() {
     if (!t) return;
     const li = document.createElement('li');
     li.className = 'seed-item';
+    const p1 = `${escapeHtml(t.p1f)} ${escapeHtml(t.p1l)}` + (t.p1desc ? ` <em>(${escapeHtml(t.p1desc)})</em>` : '');
+    const p2 = `${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}` + (t.p2desc ? ` <em>(${escapeHtml(t.p2desc)})</em>` : '');
     li.innerHTML = `
       <span class="seed-num">#${idx + 1}</span>
-      <span class="team-name">${escapeHtml(t.name || '')} <span class="muted">— ${escapeHtml(t.p1f)} ${escapeHtml(t.p1l)} / ${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}</span></span>
+      <span class="team-name">${escapeHtml(t.name || '')} <span class="muted">— ${p1} / ${p2}</span></span>
       <span class="seed-controls">
         <button class="btn-secondary btn btn-small" data-up="${id}">▲</button>
         <button class="btn-secondary btn btn-small" data-down="${id}">▼</button>
@@ -1078,9 +1096,7 @@ function renderTournament() {
   // Champion
   const champArea = document.getElementById('champion-area');
   if (state.champion) {
-    const t = state.teams.find(x => x.id === state.champion);
-    const label = t ? (t.name && t.name.trim() ? `${t.name.trim()} — ${t.p1f} ${t.p1l} & ${t.p2f} ${t.p2l}` : `${t.p1f} ${t.p1l} & ${t.p2f} ${t.p2l}`) : '???';
-    champArea.innerHTML = `<div class="champion-banner">🏆 CHAMPION: ${escapeHtml(label)} 🏆</div>`;
+    champArea.innerHTML = `<div class="champion-banner">🏆 CHAMPION: ${escapeHtml(teamFullLabel(state.champion))} 🏆</div>`;
   } else {
     champArea.innerHTML = '';
   }
