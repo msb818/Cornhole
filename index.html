@@ -254,7 +254,7 @@
       </div>
       <div class="form-row">
         <div>
-          <label>TTS Voice</label>
+          <label>TTS Voice <span class="muted">(✨ = higher quality)</span></label>
           <select id="set-tts-voice"></select>
         </div>
         <div>
@@ -283,6 +283,14 @@
         <input id="set-tts-template" style="width: 100%;" />
         <p class="muted" style="font-size: 12px; margin: 4px 0;">Placeholders: <code>{board}</code>, <code>{team1}</code>, <code>{team2}</code>, <code>{matchid}</code></p>
       </div>
+      <details style="margin-top: 12px;">
+        <summary style="cursor: pointer; color: var(--accent2); font-size: 13px;">🎙 Want it to sound more human? Install premium OS voices →</summary>
+        <div class="muted" style="font-size: 12px; line-height: 1.6; margin-top: 8px;">
+          <p><strong>macOS:</strong> System Settings → Accessibility → Spoken Content → System Voice → click the dropdown → <em>Manage Voices…</em> → check the boxes next to voices marked <em>(Premium)</em> or <em>(Enhanced)</em> like <strong>Samantha (Premium)</strong>, <strong>Ava (Premium)</strong>, <strong>Evan (Enhanced)</strong>. They download in the background (a few hundred MB each). After install, refresh this page and pick the new voice from the dropdown above.</p>
+          <p><strong>Windows 10/11:</strong> Settings → Time &amp; Language → Speech → Manage voices → <em>Add voices</em>. Install neural voices like <strong>Microsoft Aria</strong>, <strong>Jenny</strong>, or <strong>Guy</strong>. Then refresh this page — the ✨ voices in the dropdown are the high-quality ones.</p>
+          <p><strong>Tip:</strong> Edge browser often exposes Microsoft's online neural voices automatically — try opening this file in Edge if Chrome doesn't show them. Also click 🔊 Test Announcement after picking a voice to make sure it sounds right.</p>
+        </div>
+      </details>
     </div>
     <div class="panel">
       <h3>Data</h3>
@@ -1517,7 +1525,27 @@ function renderSettings() {
 function populateVoices() {
   const sel = document.getElementById('set-tts-voice');
   const voices = speechSynthesis.getVoices();
-  sel.innerHTML = '<option value="">(default)</option>' + voices.map(v => `<option value="${escapeHtml(v.name)}" ${v.name === state.settings.ttsVoice ? 'selected' : ''}>${escapeHtml(v.name)} (${v.lang})</option>`).join('');
+  const HQ_PATTERNS = /(premium|enhanced|neural|natural|wavenet|online|siri|google|microsoft.*online)/i;
+  // Prefer English voices first, then non-English; high quality on top within each group
+  const score = v => {
+    let s = 0;
+    if (HQ_PATTERNS.test(v.name)) s += 1000;
+    if (/en[-_]/i.test(v.lang)) s += 100;
+    if (v.localService === false) s += 50; // cloud-backed (often higher quality)
+    return -s;
+  };
+  const sorted = voices.slice().sort((a, b) => {
+    const sa = score(a), sb = score(b);
+    if (sa !== sb) return sa - sb;
+    return a.name.localeCompare(b.name);
+  });
+  const opts = ['<option value="">(system default)</option>'];
+  sorted.forEach(v => {
+    const hq = HQ_PATTERNS.test(v.name) ? ' ✨' : '';
+    const sel_ = v.name === state.settings.ttsVoice ? 'selected' : '';
+    opts.push(`<option value="${escapeHtml(v.name)}" ${sel_}>${hq} ${escapeHtml(v.name)} — ${escapeHtml(v.lang)}</option>`);
+  });
+  sel.innerHTML = opts.join('');
 }
 
 ['set-tts-enabled','set-auto-assign','set-auto-announce'].forEach(id => {
