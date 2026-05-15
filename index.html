@@ -119,7 +119,7 @@
 </head>
 <body>
 <header>
-  <h1>🌽 Cornhole Tournament</h1>
+  <h1>🌽 Cornhole Tournament <span style="font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 8px;">v6 — Google TTS / no team names</span></h1>
   <nav>
     <button data-view="signup" class="active">1. Sign Up</button>
     <button data-view="seeding">2. Seeding</button>
@@ -133,12 +133,8 @@
   <section id="view-signup" class="view active">
     <div class="panel">
       <h2>Team Sign Up</h2>
-      <p class="muted">Add teams as players arrive. Each team has 2 players. Team name is optional.</p>
+      <p class="muted">Add teams as players arrive. Each team has 2 players.</p>
       <div class="form-row">
-        <div class="full">
-          <label>Team Name (optional)</label>
-          <input id="in-team-name" placeholder="e.g. Bag Slingers" />
-        </div>
         <div>
           <label>Player 1 First</label>
           <input id="in-p1f" />
@@ -174,7 +170,6 @@
         <thead>
           <tr>
             <th>#</th>
-            <th>Team Name</th>
             <th>Player 1</th>
             <th>Player 2</th>
             <th></th>
@@ -446,8 +441,7 @@ function teamLabel(teamId) {
   if (teamId === 'BYE') return 'BYE';
   const t = state.teams.find(x => x.id === teamId);
   if (!t) return '???';
-  if (t.name && t.name.trim()) return t.name.trim();
-  return `${t.p1f} ${t.p1l[0] || ''}. / ${t.p2f} ${t.p2l[0] || ''}.`;
+  return `${t.p1f} ${t.p1l} / ${t.p2f} ${t.p2l}`;
 }
 
 function teamFullLabel(teamId) {
@@ -457,8 +451,7 @@ function teamFullLabel(teamId) {
   if (!t) return '???';
   const p1 = `${t.p1f} ${t.p1l}` + (t.p1desc ? ` (${t.p1desc})` : '');
   const p2 = `${t.p2f} ${t.p2l}` + (t.p2desc ? ` (${t.p2desc})` : '');
-  const players = `${p1} and ${p2}`;
-  return t.name && t.name.trim() ? `${t.name.trim()} — ${players}` : players;
+  return `${p1} and ${p2}`;
 }
 
 function teamAnnounceLabel(teamId) {
@@ -521,7 +514,6 @@ function renderSignup() {
     const p2Desc = t.p2desc ? `<div class="muted" style="font-size: 11px;">${escapeHtml(t.p2desc)}</div>` : '';
     tr.innerHTML = `
       <td>${idx + 1}</td>
-      <td>${escapeHtml(t.name || '')}</td>
       <td>${escapeHtml(t.p1f)} ${escapeHtml(t.p1l)}${p1Desc}</td>
       <td>${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}${p2Desc}</td>
       <td>
@@ -553,7 +545,6 @@ function escapeHtml(s) {
 }
 
 document.getElementById('btn-add-team').addEventListener('click', () => {
-  const name = document.getElementById('in-team-name').value.trim();
   const p1f = document.getElementById('in-p1f').value.trim();
   const p1l = document.getElementById('in-p1l').value.trim();
   const p1desc = document.getElementById('in-p1desc').value.trim();
@@ -564,12 +555,12 @@ document.getElementById('btn-add-team').addEventListener('click', () => {
     alert('Please fill in both players\' first and last names.');
     return;
   }
-  state.teams.push({ id: uid(), name, p1f, p1l, p1desc, p2f, p2l, p2desc });
+  state.teams.push({ id: uid(), p1f, p1l, p1desc, p2f, p2l, p2desc });
   saveState();
-  ['in-team-name','in-p1f','in-p1l','in-p1desc','in-p2f','in-p2l','in-p2desc'].forEach(id => {
+  ['in-p1f','in-p1l','in-p1desc','in-p2f','in-p2l','in-p2desc'].forEach(id => {
     document.getElementById(id).value = '';
   });
-  document.getElementById('in-team-name').focus();
+  document.getElementById('in-p1f').focus();
   renderSignup();
 });
 
@@ -579,7 +570,6 @@ function openEditTeam(id) {
   openModal(`
     <h3>Edit Team</h3>
     <div class="form-row">
-      <div class="full"><label>Team Name</label><input id="ed-name" value="${escapeHtml(t.name || '')}" /></div>
       <div><label>P1 First</label><input id="ed-p1f" value="${escapeHtml(t.p1f)}" /></div>
       <div><label>P1 Last</label><input id="ed-p1l" value="${escapeHtml(t.p1l)}" /></div>
       <div class="full"><label>P1 Description</label><input id="ed-p1desc" value="${escapeHtml(t.p1desc || '')}" /></div>
@@ -593,13 +583,13 @@ function openEditTeam(id) {
     </div>
   `);
   document.getElementById('ed-save').addEventListener('click', () => {
-    t.name = document.getElementById('ed-name').value.trim();
     t.p1f = document.getElementById('ed-p1f').value.trim();
     t.p1l = document.getElementById('ed-p1l').value.trim();
     t.p1desc = document.getElementById('ed-p1desc').value.trim();
     t.p2f = document.getElementById('ed-p2f').value.trim();
     t.p2l = document.getElementById('ed-p2l').value.trim();
     t.p2desc = document.getElementById('ed-p2desc').value.trim();
+    delete t.name;
     saveState();
     closeModal();
     renderSignup();
@@ -643,7 +633,7 @@ function renderSeeding() {
     const p2 = `${escapeHtml(t.p2f)} ${escapeHtml(t.p2l)}` + (t.p2desc ? ` <em>(${escapeHtml(t.p2desc)})</em>` : '');
     li.innerHTML = `
       <span class="seed-num">#${idx + 1}</span>
-      <span class="team-name">${escapeHtml(t.name || '')} <span class="muted">— ${p1} / ${p2}</span></span>
+      <span class="team-name">${p1} <span class="muted">/</span> ${p2}</span>
       <span class="seed-controls">
         <button class="btn-secondary btn btn-small" data-up="${id}">▲</button>
         <button class="btn-secondary btn btn-small" data-down="${id}">▼</button>
