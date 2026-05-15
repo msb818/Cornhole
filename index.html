@@ -258,9 +258,18 @@
           <input type="number" id="set-tts-volume" min="0" max="1" step="0.1" value="1" />
         </div>
         <div>
+          <label>Announce Repeats</label>
+          <input type="number" id="set-announce-repeats" min="1" max="10" step="1" />
+        </div>
+        <div>
+          <label>Repeat Interval (sec)</label>
+          <input type="number" id="set-announce-interval" min="5" max="600" step="5" />
+        </div>
+        <div>
           <button class="btn" id="btn-test-tts">🔊 Test Announcement</button>
         </div>
       </div>
+      <p class="muted" style="font-size: 12px; margin: 4px 0 8px;">Announcements repeat at the interval above (e.g. 3 repeats × 60 sec = announce now, again at 1 min, again at 2 min). Repeats stop automatically when the match ends or the board is reassigned.</p>
       <div style="margin-top: 8px;">
         <label>Announcement Template</label>
         <input id="set-tts-template" style="width: 100%;" />
@@ -313,6 +322,8 @@ function freshState() {
       autoAssign: true,
       autoAnnounce: true,
       template: '{team1} to {board} board. {team2} to {board} board.',
+      announceRepeats: 3,
+      announceIntervalSec: 60,
     },
   };
 }
@@ -331,6 +342,10 @@ function loadState() {
     ];
     if (s.settings && OLD_TEMPLATES.includes(s.settings.template)) {
       s.settings.template = '{team1} to {board} board. {team2} to {board} board.';
+    }
+    if (s.settings) {
+      if (s.settings.announceRepeats === undefined) s.settings.announceRepeats = 3;
+      if (s.settings.announceIntervalSec === undefined) s.settings.announceIntervalSec = 60;
     }
     return s;
   } catch (e) { return null; }
@@ -786,6 +801,7 @@ function autoResolveByes() {
 
 function resolveMatchInternal(matchId, winnerId) {
   const m = state.matches[matchId];
+  cancelPendingAnnouncements(matchId);
   m.winnerId = winnerId;
   m.loserId = (winnerId === 'BYE') ? 'BYE' : (winnerId === m.team1Id ? m.team2Id : m.team1Id);
   m.status = 'done';
@@ -873,6 +889,7 @@ function assignMatchToBoard(matchId, boardIdx, doAnnounce) {
   state.boards.forEach((b, i) => { if (b.matchId === matchId) b.matchId = null; });
   // unassign whatever was on the target board
   if (state.boards[boardIdx].matchId) {
+    cancelPendingAnnouncements(state.boards[boardIdx].matchId);
     const prev = state.matches[state.boards[boardIdx].matchId];
     if (prev && prev.status === 'playing') prev.status = 'ready';
     if (prev) prev.boardId = null;
@@ -905,6 +922,7 @@ function undoMatch(matchId) {
   function recursiveClear(id) {
     const x = state.matches[id];
     if (!x) return;
+    cancelPendingAnnouncements(id);
     // Remove from any board
     if (x.boardId != null) {
       state.boards[x.boardId].matchId = null;
@@ -973,10 +991,20 @@ function undoMatch(matchId) {
 /* ============================================================
    ANNOUNCEMENTS (TTS)
 ============================================================ */
-function speak(text) {
+// Pending repeat-announcement timers (not persisted across page refresh)
+const pendingAnnouncements = new Map(); // matchId -> [timeoutId, ...]
+
+function cancelPendingAnnouncements(matchId) {
+  const arr = pendingAnnouncements.get(matchId);
+  if (arr) arr.forEach(tid => clearTimeout(tid));
+  pendingAnnouncements.delete(matchId);
+}
+
+function speak(text, opts) {
   if (!state.settings.ttsEnabled) return;
   if (typeof speechSynthesis === 'undefined') return;
-  try { speechSynthesis.cancel(); } catch (e) {}
+  const interrupt = opts && opts.interrupt;
+  if (interrupt) { try { speechSynthesis.cancel(); } catch (e) {} }
   const u = new SpeechSynthesisUtterance(text);
   u.rate = parseFloat(state.settings.ttsRate) || 0.95;
   u.volume = parseFloat(state.settings.ttsVolume);
@@ -989,17 +1017,49 @@ function speak(text) {
   speechSynthesis.speak(u);
 }
 
-function announceMatch(matchId) {
+function announceMatch(matchId, opts) {
   const m = state.matches[matchId];
   if (!m || m.boardId == null) return;
   const board = state.boards[m.boardId];
   const t1 = teamAnnounceLabel(m.team1Id);
   const t2 = teamAnnounceLabel(m.team2Id);
-  let text = state.settings.template || 'Next up on {board}: {team1} versus {team2}.';
+  let text = state.settings.template || '{team1} to {board} board. {team2} to {board} board.';
   text = text.replace(/{board}/g, board.name).replace(/{team1}/g, t1).replace(/{team2}/g, t2).replace(/{matchid}/g, matchId);
-  speak(text);
+
+  const repeats = Math.max(1, Math.min(10, parseInt(state.settings.announceRepeats) || 1));
+  const intervalMs = Math.max(5, Math.min(600, parseFloat(state.settings.announceIntervalSec) || 60)) * 1000;
+  const skipRepeats = opts && opts.skipRepeats;
+
+  // Cancel any prior repeat schedule for this match before starting fresh
+  cancelPendingAnnouncements(matchId);
+
+  // First announcement: immediate
+  speak(text, { interrupt: !!(opts && opts.interrupt) });
   m.announcedAt = Date.now();
-  logAnnounce(`📢 [${board.name}] ${matchId}: ${t1} vs ${t2}`);
+  logAnnounce(`📢 [${board.name}] ${matchId} (1/${repeats}): ${t1} vs ${t2}`);
+
+  if (skipRepeats || repeats <= 1) return;
+
+  const boardName = board.name;
+  const timeouts = [];
+  for (let i = 1; i < repeats; i++) {
+    const tid = setTimeout(() => {
+      // Only repeat if the match is still on this same board and still playing
+      const cm = state.matches[matchId];
+      if (!cm || cm.status !== 'playing' || cm.boardId == null) {
+        cancelPendingAnnouncements(matchId);
+        return;
+      }
+      if (state.boards[cm.boardId].name !== boardName) {
+        cancelPendingAnnouncements(matchId);
+        return;
+      }
+      speak(text);
+      logAnnounce(`📢 [${boardName}] ${matchId} (${i + 1}/${repeats}): ${t1} vs ${t2}`);
+    }, intervalMs * i);
+    timeouts.push(tid);
+  }
+  pendingAnnouncements.set(matchId, timeouts);
 }
 
 function logAnnounce(text) {
@@ -1068,6 +1128,7 @@ function renderTournament() {
       const idx = parseInt(b.dataset.clearboard);
       const board = state.boards[idx];
       if (board.matchId) {
+        cancelPendingAnnouncements(board.matchId);
         const m = state.matches[board.matchId];
         if (m && m.status === 'playing') m.status = 'ready';
         if (m) m.boardId = null;
@@ -1432,6 +1493,8 @@ function renderSettings() {
   document.getElementById('set-tts-rate').value = state.settings.ttsRate;
   document.getElementById('set-tts-volume').value = state.settings.ttsVolume;
   document.getElementById('set-tts-template').value = state.settings.template;
+  document.getElementById('set-announce-repeats').value = state.settings.announceRepeats;
+  document.getElementById('set-announce-interval').value = state.settings.announceIntervalSec;
   populateVoices();
 }
 
@@ -1448,10 +1511,17 @@ function populateVoices() {
     saveState();
   });
 });
-['set-tts-rate','set-tts-volume','set-tts-template','set-tts-voice'].forEach(id => {
+['set-tts-rate','set-tts-volume','set-tts-template','set-tts-voice','set-announce-repeats','set-announce-interval'].forEach(id => {
   document.getElementById(id).addEventListener('change', e => {
-    const key = id === 'set-tts-rate' ? 'ttsRate' : id === 'set-tts-volume' ? 'ttsVolume' : id === 'set-tts-template' ? 'template' : 'ttsVoice';
-    state.settings[key] = e.target.value;
+    const keyMap = {
+      'set-tts-rate': 'ttsRate',
+      'set-tts-volume': 'ttsVolume',
+      'set-tts-template': 'template',
+      'set-tts-voice': 'ttsVoice',
+      'set-announce-repeats': 'announceRepeats',
+      'set-announce-interval': 'announceIntervalSec',
+    };
+    state.settings[keyMap[id]] = e.target.value;
     saveState();
   });
 });
