@@ -119,7 +119,7 @@
 </head>
 <body>
 <header>
-  <h1>🌽 Cornhole Tournament <span style="font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 8px;">v6 — Google TTS / no team names</span></h1>
+  <h1>🌽 Cornhole Tournament <span style="font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 8px;">v7 — "playing on the X board" phrasing</span></h1>
   <nav>
     <button data-view="signup" class="active">1. Sign Up</button>
     <button data-view="seeding">2. Seeding</button>
@@ -374,7 +374,7 @@ function freshState() {
       ttsVolume: 1,
       autoAssign: true,
       autoAnnounce: true,
-      template: '{team1} to {board} board. {team2} to {board} board.',
+      template: '{team1} playing on the {board} board. {team2} playing on the {board} board.',
       announceRepeats: 3,
       announceIntervalSec: 60,
       ttsProvider: 'browser', // 'browser' or 'google'
@@ -412,9 +412,10 @@ function loadState() {
       'Next up on {board} board: {team1}, versus {team2}. Please report to the {board} board.',
       'Next up on {board}: {team1} versus {team2}. Please report to {board} board.',
       'Next up on {board}: {team1} versus {team2}.',
+      '{team1} to {board} board. {team2} to {board} board.',
     ];
     if (s.settings && OLD_TEMPLATES.includes(s.settings.template)) {
-      s.settings.template = '{team1} to {board} board. {team2} to {board} board.';
+      s.settings.template = '{team1} playing on the {board} board. {team2} playing on the {board} board.';
     }
     if (s.settings) {
       if (s.settings.announceRepeats === undefined) s.settings.announceRepeats = 3;
